@@ -15,7 +15,7 @@ class USB(object):
         #
         self.bufferSize = 1024  # size of circular self.buffer to allocate
         self.buffer = [' '] * self.bufferSize  # circuolar incomming USB serial data self.buffer (pre fill)
-        self.bufferEcho = True  # USB serial port echo incooming characters (True/False)
+        self.bufferEcho = False  # USB serial port echo incooming characters (True/False)
         self.bufferNextIn, self.bufferNextOut = 0, 0  # pointers to next in/out character in circualr self.buffer
         self.terminateThread = False  # tell 'self.bufferSTDIN' function to terminate (True/False)
 
@@ -93,45 +93,6 @@ class USB(object):
                 self.bufferNextOut = 0
         return line  # RETURN unclaimed line of input
 
-    #
-    # main program begins here ...
-    #
-    # set 'inputOption' to either  one byte ‘BYTE’  OR one line ‘LINE’ at a time. Remember, ‘self.bufferEcho’
-    # determines if the background self.buffering function ‘self.bufferSTDIN’ should automatically echo each
-    # byte it receives from the USB serial port or not (useful when operating in line mode when the
-    # host computer is running a serial terminal program)
-    #
-    # start this MicroPython code running (exit Thonny with code still running) and then start a
-    # serial terminal program (e.g. putty, minicom or screen) on the host computer and connect
-    # to the Raspberry Pi Pico ...
-    #
-    #    ... start typing text and hit return.
-    #
-    #    NOTE: use Ctrl-C, Ctrl-C, Ctrl-D then Ctrl-B on in the host computer terminal program
-    #           to terminate the MicroPython code running on the Pico
-    #
-    def start(self):
-        try:
-            inputOption = 'LINE'  # get input from self.buffer one BYTE or LINE at a time
-            while True:
-
-                if inputOption == 'BYTE':  # NON-BLOCKING input one byte at a time
-                    buffCh = self.getBytebuffer()  # get a byte if it is available?
-                    if buffCh:  # if there is...
-
-                        print(buffCh, end='')  # ...print it out to the USB serial port
-
-                elif inputOption == 'LINE':  # NON-BLOCKING input one line at a time (ending LF)
-                    buffLine = self.getLineBuffer()  # get a line if it is available?
-                    if buffLine:  # if there is...
-                        print(buffLine)  # ...print it out to the USB serial port
-
-                sleep(0.1)
-
-        except KeyboardInterrupt:  # trap Ctrl-C input
-            terminateThread = True  # signal second 'background' thread to terminate
-            exit()
-
 
 usb = USB()
 input_msg = None
@@ -143,16 +104,16 @@ while True:
         cnt = 0
         print('ping')
 
-    inputOption = 'LINE'  # get input from self.buffer one BYTE or LINE at a time
+    inputOption = 'BYTE'  # get input from self.buffer one BYTE or LINE at a time
     if inputOption == 'BYTE':  # NON-BLOCKING input one byte at a time
         buffCh = usb.getBytebuffer()  # get a byte if it is available?
         if buffCh:  # if there is...
-            print('BYTE')
+            print(buffCh, end='.')
             # print(buffCh, end='')  # ...print it out to the USB serial port
 
     elif inputOption == 'LINE':  # NON-BLOCKING input one line at a time (ending LF)
         buffLine = usb.getLineBuffer()  # get a line if it is available?
         if buffLine:  # if there is...
-            print('LINE')  # ...print it out to the USB serial port
+            print(buffLine, end='')  # ...print it out to the USB serial port
 
     sleep_ms(50)
