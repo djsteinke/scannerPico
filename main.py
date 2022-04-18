@@ -1,12 +1,20 @@
 from time import sleep_ms
 from _thread import start_new_thread
-from sys import stdin, exit
-from utime import sleep
+from sys import stdin
+import utime
+from machine import Pin
 
 
-#
-# self.bufferSTDIN() function to execute in parallel on second Pico RD2040 thread/processor
-#
+PUL = Pin(18, Pin.OUT)          # Motor pulse
+DIR = Pin(19, Pin.OUT)          # Motor direction
+ENBL = Pin(20, Pin.OUT)          # Motor enable
+
+L1 = Pin(16, Pin.OUT)            # LEFT Laser
+L2 = Pin(17, Pin.OUT)            # RIGHT laser
+
+LED = Pin(25, Pin.OUT)
+LED.off()
+
 
 class USB(object):
     def __init__(self):
@@ -19,7 +27,7 @@ class USB(object):
         self.bufferNextIn, self.bufferNextOut = 0, 0  # pointers to next in/out character in circualr self.buffer
         self.terminateThread = False  # tell 'self.bufferSTDIN' function to terminate (True/False)
 
-    def bufferSTDIN(self):
+    def buffer_stdin(self):
         while True:  # endless loop
             if self.terminateThread:  # if requested by main thread ...
                 break  # ... exit loop
@@ -30,16 +38,7 @@ class USB(object):
             if self.bufferNextIn == self.bufferSize:  # ... and wrap, if necessary
                 self.bufferNextIn = 0
 
-    #
-    # instantiate second 'background' thread on RD2040 dual processor to monitor and self.buffer
-    # incomming data from 'stdin' over USB serial port using ‘self.bufferSTDIN‘ function (above)
-    #
-    # self.bufferSTDINthread = start_new_thread(self.bufferSTDIN, ())
-
-    #
-    # function to check if a byte is available in the self.buffer and if so, return it
-    #
-    def getBytebuffer(self):
+    def get_byte_buffer(self):
         if self.bufferNextOut == self.bufferNextIn:  # if no unclaimed byte in self.buffer ...
             return ''  # ... return a null string
         n = self.bufferNextOut  # save current pointer
@@ -48,72 +47,94 @@ class USB(object):
             self.bufferNextOut = 0
         return self.buffer[n]  # return byte from self.buffer
 
-    #
-    # function to check if a line is available in the self.buffer and if so return it
-    # otherwise return a null string
-    #
-    # NOTE 1: a line is one or more bytes with the last byte being LF (\x0a)
-    #      2: a line containing only a single LF byte will also return a null string
-    #
-    def getLineBuffer(self):
-        if self.bufferNextOut == self.bufferNextIn:  # if no unclaimed byte in self.buffer ...
-            return ''  # ... RETURN a null string
 
-        n = self.bufferNextOut  # search for a LF in unclaimed bytes
-        while n != self.bufferNextIn:
-            if self.buffer[n] == '\x0a':  # if a LF found ...
-                break  # ... exit loop ('n' pointing to LF)
-            n += 1  # bump pointer
-            if n == self.bufferSize:  # ... wrap, if necessary
-                n = 0
-        if n == self.bufferNextIn:  # if no LF found ...
-            return ''  # ... RETURN a null string
+def process_msg(data):
+    global rpm, mps
+    msgs = []
+    msgs = data.split(":")
+    msg_id = msgs[0]
+    msg = ""
+    response = f"{msg_id}"
+    #if len(msgs > 1):
+    msg = msgs[1]
 
-        line = ''  # LF found in unclaimed bytes at pointer 'n'
-        n += 1  # bump pointer past LF
-        if n == self.bufferSize:  # ... wrap, if necessary
-            n = 0
+    found = False
+    if msg == "L10":
+        # Laser 1 OFF
+        L1.off()
+        LED.off()
+        found = True
+    elif msg == "L11":
+        # Laser 1 ON
+        L1.on()
+        LED.on()
+        found = True
+    elif msg == "L20":
+        # Laser 2 OFF
+        L2.off()
+        found = True
+    elif msg == "L21":
+        # Laser 2 ON
+        L2.on()
+        found = True
+    elif msg == "RPM":
+        if len(msgs) > 2:
+            rpm = int(msgs[2])
+            set_mps()
+        found = True
+    elif msg == "STEP":
+        if len(msgs) > 2:
+            steps = int(msgs[2])
+            cw = False
+            if len(msgs) > 3:
+                cw = msgs[3] == "CW"
+            step(steps, cw)
+        found = True
 
-        while self.bufferNextOut != n:  # BUILD line to RETURN until LF pointer 'n' hit
+    if found:
+        response += ":complete"
+    else:
+        response += f":error:no match found for [{msg}]"
+    print(response)
 
-            if self.buffer[self.bufferNextOut] == '\x0d':  # if byte is CR
-                self.bufferNextOut += 1  # bump pointer
-                if self.bufferNextOut == self.bufferSize:  # ... wrap, if necessary
-                    self.bufferNextOut = 0
-                continue  # ignore (strip) any CR (\x0d) bytes
 
-            if self.buffer[self.bufferNextOut] == '\x0a':  # if current byte is LF ...
-                self.bufferNextOut += 1  # bump pointer
-                if self.bufferNextOut == self.bufferSize:  # ... wrap, if necessary
-                    self.bufferNextOut = 0
-                break  # and exit loop, ignoring (i.e. strip) LF byte
-            line = line + self.buffer[self.bufferNextOut]  # add byte to line
-            self.bufferNextOut += 1  # bump pointer
-            if self.bufferNextOut == self.bufferSize:  # wrap, if necessary
-                self.bufferNextOut = 0
-        return line  # RETURN unclaimed line of input
+def step(steps, cw):
+    if cw:
+        DIR.on()
+    else:
+        DIR.off()
+    for n in range(0, steps):
+        PUL.on()
+        utime.sleep_ms(mps)
+        PUL.off()
+        utime.sleep_ms(mps)
+    return True
 
+
+def set_mps():
+    global mps
+    mps = int(60000 / rpm / ppr / 2)
+
+
+rpm = 5
+fspr = 200              # motor full steps per rev
+ms = 16                 # driver micro steps setting
+ppr = fspr * ms
+mps = 0
+
+set_mps()
 
 usb = USB()
-input_msg = None
-bufferSTDINthread = start_new_thread(usb.bufferSTDIN, ())
-cnt = 0
+stdin_thread = start_new_thread(usb.buffer_stdin, ())
 while True:
-    cnt += 1
-    if cnt > 50:
-        cnt = 0
-        print('ping')
 
-    inputOption = 'BYTE'  # get input from self.buffer one BYTE or LINE at a time
-    if inputOption == 'BYTE':  # NON-BLOCKING input one byte at a time
-        buffCh = usb.getBytebuffer()  # get a byte if it is available?
-        if buffCh:  # if there is...
-            print(buffCh, end='.')
-            # print(buffCh, end='')  # ...print it out to the USB serial port
-
-    elif inputOption == 'LINE':  # NON-BLOCKING input one line at a time (ending LF)
-        buffLine = usb.getLineBuffer()  # get a line if it is available?
-        if buffLine:  # if there is...
-            print(buffLine, end='')  # ...print it out to the USB serial port
+    buffCh = usb.get_byte_buffer()  # get a byte if it is available?
+    s = ""
+    while buffCh:
+        s += ''.join([b for b in buffCh])
+        buffCh = usb.get_byte_buffer()  # get a byte if it is available?
+    if len(s) > 0:
+        s.replace('\r\n', '')
+        process_msg(s)
 
     sleep_ms(50)
