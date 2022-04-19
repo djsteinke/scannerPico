@@ -1,12 +1,8 @@
 import serial
 from time import sleep
 
-try:
-    serial = serial.Serial("COM5", 9600, timeout=1)
-    print('Connected')
-except serial.SerialException:
-    print('Arduino not found.')
-    raise Exception('Failed to connect')
+serial = serial.Serial("COM5", 9600, timeout=1)
+print('Connected')
 
 try:
     while True:
