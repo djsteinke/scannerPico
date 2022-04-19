@@ -53,10 +53,8 @@ def process_msg(data):
     msgs = []
     msgs = data.split(":")
     msg_id = msgs[0]
-    msg = ""
-    response = f"{msg_id}"
-    #if len(msgs > 1):
     msg = msgs[1]
+    response = ""
 
     found = False
     if msg == "L10":
@@ -92,9 +90,9 @@ def process_msg(data):
         found = True
 
     if found:
-        response += ":complete"
+        response += f"{msg_id}:{msg}:1:0"
     else:
-        response += f":error:no match found for [{msg}]"
+        response += f"{msg_id}:{msg}:0:0"
     print(response)
 
 
@@ -134,7 +132,6 @@ while True:
         s += ''.join([b for b in buffCh])
         buffCh = usb.get_byte_buffer()  # get a byte if it is available?
     if len(s) > 0:
-        s.replace('\r\n', '')
         process_msg(s)
 
     sleep_ms(50)
