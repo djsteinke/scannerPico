@@ -50,10 +50,11 @@ class USB(object):
 
 def process_msg(data):
     global rpm, mps
-    msgs = []
     msgs = data.split(":")
     msg_id = msgs[0]
-    msg = msgs[1]
+    msg = "NONE"
+    if len(msgs) > 1:
+        msg = msgs[1]
     response = ""
 
     found = False
