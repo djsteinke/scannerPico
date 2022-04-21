@@ -48,14 +48,27 @@ class USB(object):
         return self.buffer[n]  # return byte from self.buffer
 
 
+def get_arr_value(arr, i):
+    try:
+        val = arr[i]
+    except IndexError as e:
+        val = 'none'
+    return val
+
+
+def get_int_value(in_str):
+    try:
+        ret = int(in_str)
+    except ValueError as e:
+        ret = 0
+    return ret
+
+
 def process_msg(data):
     global rpm, mps
     msgs = data.split(":")
-    msg_id = msgs[0]
-    msg = "NONE"
-    if len(msgs) > 1:
-        msg = msgs[1]
-    response = ""
+    msg_id = get_arr_value(msgs, 0)
+    msg = get_arr_value(msgs, 1)
 
     found = False
     if msg == "L10":
@@ -77,44 +90,44 @@ def process_msg(data):
         L2.on()
         found = True
     elif msg == "RPM":
-        if len(msgs) > 2:
-            rpm = int(msgs[2])
+        tmp = get_int_value(get_arr_value(msgs, 2))
+        if tmp > 0:
+            rpm = tmp
             set_mps()
-        found = True
+            found = True
     elif msg == "STEP":
-        if len(msgs) > 2:
-            steps = int(msgs[2])
-            cw = False
-            if len(msgs) > 3:
-                cw = msgs[3] == "CW"
+        tmp = get_int_value(get_arr_value(msgs, 2))
+        if tmp > 0:
+            steps = tmp
+            cw = (get_arr_value(msgs, 3) == "CW")
             step(steps, cw)
-        found = True
+            found = True
 
     if found:
-        response += f"{msg_id}:{msg}:1:0"
+        response = f"{msg_id}:{msg}:1:end"
     else:
-        response += f"{msg_id}:{msg}:0:0"
+        response = f"{msg_id}:{msg}:0:end"
     print(response)
 
 
 def step(steps, cw):
     if cw:
-        DIR.on()
-    else:
         DIR.off()
+    else:
+        DIR.on()
     for n in range(0, steps):
         PUL.on()
-        utime.sleep_ms(mps)
+        utime.sleep_ms(pulse_w)
         PUL.off()
         utime.sleep_ms(mps)
-    return True
 
 
 def set_mps():
     global mps
-    mps = int(60000 / rpm / ppr / 2)
+    mps = int(60000000 / rpm / ppr) - pulse_w
 
 
+pulse_w = 200
 rpm = 5
 fspr = 200              # motor full steps per rev
 ms = 16                 # driver micro steps setting
@@ -125,6 +138,7 @@ set_mps()
 
 usb = USB()
 stdin_thread = start_new_thread(usb.buffer_stdin, ())
+
 while True:
 
     buffCh = usb.get_byte_buffer()  # get a byte if it is available?
@@ -135,4 +149,4 @@ while True:
     if len(s) > 0:
         process_msg(s)
 
-    sleep_ms(50)
+    sleep_ms(100)

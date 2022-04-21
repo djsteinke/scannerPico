@@ -1,5 +1,5 @@
 import machine
-from time import sleep_ms, sleep
+from time import sleep_ms
 
 
 def write_mem(reg, data):
@@ -50,7 +50,7 @@ def led_flash(cnt=1):
 
 
 def get_out():
-    return {'c': temp_c, 'f': temp_f, 'h': humid}
+    return '{"c": %0.2f, "f": %0.2f, "h": %0.1f}' % (temp_c, temp_f, humid)
 
 
 led = machine.Pin(25, machine.Pin.OUT)
@@ -78,9 +78,7 @@ if state_word == device_check:
 sleep_ms(10)
 
 while True:
-    for i in range(0, 60):
-        if i == 0:
-            measure()
-            print(get_out())
-            led_flash()
-        sleep(1)
+    measure()
+    print(get_out())
+    led_flash()
+    machine.lightsleep(60000)
