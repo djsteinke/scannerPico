@@ -9,6 +9,7 @@ import select
 PUL = Pin(18, Pin.OUT)          # Motor pulse
 DIR = Pin(19, Pin.OUT)          # Motor direction
 ENBL = Pin(20, Pin.OUT)          # Motor enable
+ENBL.on()
 
 L1 = Pin(16, Pin.OUT)            # LEFT Laser
 L2 = Pin(17, Pin.OUT)            # RIGHT laser
