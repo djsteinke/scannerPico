@@ -149,4 +149,4 @@ while True:
     if len(s) > 0:
         process_msg(s)
 
-    sleep_ms(10)
+    sleep_ms(50)

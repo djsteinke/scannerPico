@@ -3,6 +3,7 @@ from _thread import start_new_thread
 from sys import stdin
 import utime
 from machine import Pin
+import select
 
 
 PUL = Pin(18, Pin.OUT)          # Motor pulse
@@ -14,38 +15,6 @@ L2 = Pin(17, Pin.OUT)            # RIGHT laser
 
 LED = Pin(25, Pin.OUT)
 LED.off()
-
-
-class USB(object):
-    def __init__(self):
-        #
-        # global variables to share between both threads/processors
-        #
-        self.bufferSize = 1024  # size of circular self.buffer to allocate
-        self.buffer = [' '] * self.bufferSize  # circuolar incomming USB serial data self.buffer (pre fill)
-        self.bufferEcho = False  # USB serial port echo incooming characters (True/False)
-        self.bufferNextIn, self.bufferNextOut = 0, 0  # pointers to next in/out character in circualr self.buffer
-        self.terminateThread = False  # tell 'self.bufferSTDIN' function to terminate (True/False)
-
-    def buffer_stdin(self):
-        while True:  # endless loop
-            if self.terminateThread:  # if requested by main thread ...
-                break  # ... exit loop
-            self.buffer[self.bufferNextIn] = stdin.read(1)  # wait for/store next byte from USB serial
-            if self.bufferEcho:  # if echo is True ...
-                print(self.buffer[self.bufferNextIn], end='')  # ... output byte to USB serial
-            self.bufferNextIn += 1  # bump pointer
-            if self.bufferNextIn == self.bufferSize:  # ... and wrap, if necessary
-                self.bufferNextIn = 0
-
-    def get_byte_buffer(self):
-        if self.bufferNextOut == self.bufferNextIn:  # if no unclaimed byte in self.buffer ...
-            return ''  # ... return a null string
-        n = self.bufferNextOut  # save current pointer
-        self.bufferNextOut += 1  # bump pointer
-        if self.bufferNextOut == self.bufferSize:  # ... wrap, if necessary
-            self.bufferNextOut = 0
-        return self.buffer[n]  # return byte from self.buffer
 
 
 def get_arr_value(arr, i):
@@ -64,7 +33,7 @@ def get_int_value(in_str):
     return ret
 
 
-def process_msg(data):
+def process_msg_old(data):
     global rpm, mps
     msgs = data.split(":")
     msg_id = get_arr_value(msgs, 0)
@@ -110,6 +79,42 @@ def process_msg(data):
     print(response)
 
 
+def process_msg(a, d, v):
+    global rpm
+
+    success = False
+    if a == 1:
+        # Laser 1 OFF
+        L1.off()
+        LED.off()
+        success = True
+    elif a == 2:
+        # Laser 1 ON
+        L1.on()
+        LED.on()
+        success = True
+    elif a == 3:
+        # Laser 2 OFF
+        L2.off()
+        success = True
+    elif a == 4:
+        # Laser 2 ON
+        L2.on()
+        success = True
+    elif a == 5:
+        if v > 0:
+            rpm = v
+            set_mps()
+            success = True
+    elif a == 6:
+        if v > 0:
+            cw = d == 0
+            step(v, cw)
+            success = True
+
+    return success
+
+
 def step(steps, cw):
     if cw:
         DIR.off()
@@ -127,6 +132,23 @@ def set_mps():
     mps = int(60000000 / rpm / ppr) - pulse_w
 
 
+def process_byte_msg():
+    global msg_int, comp
+    msg_id = msg_int >> 22
+    a = ((msg_int >> 16) & 0x003c) >> 2
+    d = (msg_int >> 16) & 0x0003
+    v = msg_int & 0xffff
+    success = process_msg(a, d, v)
+
+    ret = msg_id << 6
+    if success:
+        ret += 1
+        print(str(ret))
+    else:
+        print(a, d, v)
+
+
+comp = True
 pulse_w = 200
 rpm = 5
 fspr = 200              # motor full steps per rev
@@ -136,17 +158,15 @@ mps = 0
 
 set_mps()
 
-usb = USB()
-stdin_thread = start_new_thread(usb.buffer_stdin, ())
+poll = select.poll()
+poll.register(stdin, select.POLLIN)
+
+msg_int = 0
 
 while True:
 
-    buffCh = usb.get_byte_buffer()  # get a byte if it is available?
-    s = ""
-    while buffCh:
-        s += ''.join([b for b in buffCh])
-        buffCh = usb.get_byte_buffer()  # get a byte if it is available?
-    if len(s) > 0:
-        process_msg(s)
+    if poll.poll(0):
+        msg_int = int(stdin.readline(10))
+        process_byte_msg()
 
-    sleep_ms(50)
+    sleep_ms(10)
