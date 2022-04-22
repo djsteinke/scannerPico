@@ -122,9 +122,9 @@ def step(steps, cw):
         DIR.on()
     for n in range(0, steps):
         PUL.on()
-        utime.sleep_ms(pulse_w)
+        utime.sleep_us(pulse_w)
         PUL.off()
-        utime.sleep_ms(mps)
+        utime.sleep_us(mps)
 
 
 def set_mps():
