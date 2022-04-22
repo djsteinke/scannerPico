@@ -1,84 +1,152 @@
-import machine
 from time import sleep_ms
+from _thread import start_new_thread
+from sys import stdin
+import utime
+from machine import Pin
 
 
-def write_mem(reg, data):
-    buf = bytearray()
-    for d in data:
-        buf.append(d)
-    i2c.writeto_mem(address, reg, buf)
+PUL = Pin(18, Pin.OUT)          # Motor pulse
+DIR = Pin(19, Pin.OUT)          # Motor direction
+ENBL = Pin(20, Pin.OUT)          # Motor enable
+
+L1 = Pin(16, Pin.OUT)            # LEFT Laser
+L2 = Pin(17, Pin.OUT)            # RIGHT laser
+
+LED = Pin(25, Pin.OUT)
+LED.off()
 
 
-def write(data):
-    buf = bytearray()
-    for d in data:
-        buf.append(d)
-    i2c.writeto(address, buf)
+class USB(object):
+    def __init__(self):
+        #
+        # global variables to share between both threads/processors
+        #
+        self.bufferSize = 1024  # size of circular self.buffer to allocate
+        self.buffer = [' '] * self.bufferSize  # circuolar incomming USB serial data self.buffer (pre fill)
+        self.bufferEcho = False  # USB serial port echo incooming characters (True/False)
+        self.bufferNextIn, self.bufferNextOut = 0, 0  # pointers to next in/out character in circualr self.buffer
+        self.terminateThread = False  # tell 'self.bufferSTDIN' function to terminate (True/False)
+
+    def buffer_stdin(self):
+        while True:  # endless loop
+            if self.terminateThread:  # if requested by main thread ...
+                break  # ... exit loop
+            self.buffer[self.bufferNextIn] = stdin.read(1)  # wait for/store next byte from USB serial
+            if self.bufferEcho:  # if echo is True ...
+                print(self.buffer[self.bufferNextIn], end='')  # ... output byte to USB serial
+            self.bufferNextIn += 1  # bump pointer
+            if self.bufferNextIn == self.bufferSize:  # ... and wrap, if necessary
+                self.bufferNextIn = 0
+
+    def get_byte_buffer(self):
+        if self.bufferNextOut == self.bufferNextIn:  # if no unclaimed byte in self.buffer ...
+            return ''  # ... return a null string
+        n = self.bufferNextOut  # save current pointer
+        self.bufferNextOut += 1  # bump pointer
+        if self.bufferNextOut == self.bufferSize:  # ... wrap, if necessary
+            self.bufferNextOut = 0
+        return self.buffer[n]  # return byte from self.buffer
 
 
-def read_mem(reg, nbytes=1):
-    return i2c.readfrom_mem(address, reg, nbytes)
+def get_arr_value(arr, i):
+    try:
+        val = arr[i]
+    except IndexError as e:
+        val = 'none'
+    return val
 
 
-def read(nbytes=1):
-    return i2c.readfrom(address, nbytes)
+def get_int_value(in_str):
+    try:
+        ret = int(in_str)
+    except ValueError as e:
+        ret = 0
+    return ret
 
 
-def measure():
-    global temp_c, temp_f, humid
-    write_mem(0xAC, measure_cmd)
-    sleep_ms(250)
-    while True:
-        ret = read(1)
-        if ret[0] & 0x01 == 0:
-            break
-        sleep_ms(50)
-    data = read(7)
-    temp_raw = ((data[3] & 0x0F) << 16) | (data[4] << 8) | data[5]
-    temp_c = round((temp_raw / 1048575 * 160) - 40, 2)
-    temp_f = round(temp_c * 1.8 + 32.0, 2)
-    humid_raw = ((data[1] << 16) | (data[2] << 8) | data[3]) >> 4
-    humid = round(humid_raw / 1048576 * 100, 1)
+def process_msg(data):
+    global rpm, mps
+    msgs = data.split(":")
+    msg_id = get_arr_value(msgs, 0)
+    msg = get_arr_value(msgs, 1)
+
+    found = False
+    if msg == "L10":
+        # Laser 1 OFF
+        L1.off()
+        LED.off()
+        found = True
+    elif msg == "L11":
+        # Laser 1 ON
+        L1.on()
+        LED.on()
+        found = True
+    elif msg == "L20":
+        # Laser 2 OFF
+        L2.off()
+        found = True
+    elif msg == "L21":
+        # Laser 2 ON
+        L2.on()
+        found = True
+    elif msg == "RPM":
+        tmp = get_int_value(get_arr_value(msgs, 2))
+        if tmp > 0:
+            rpm = tmp
+            set_mps()
+            found = True
+    elif msg == "STEP":
+        tmp = get_int_value(get_arr_value(msgs, 2))
+        if tmp > 0:
+            steps = tmp
+            cw = (get_arr_value(msgs, 3) == "CW")
+            step(steps, cw)
+            found = True
+
+    if found:
+        response = f"{msg_id}:{msg}:1:end"
+    else:
+        response = f"{msg_id}:{msg}:0:end"
+    print(response)
 
 
-def led_flash(cnt=1):
-    for i in range(0, cnt):
-        led.on()
-        sleep_ms(250)
-        led.off()
-        sleep_ms(250)
+def step(steps, cw):
+    if cw:
+        DIR.off()
+    else:
+        DIR.on()
+    for n in range(0, steps):
+        PUL.on()
+        utime.sleep_ms(pulse_w)
+        PUL.off()
+        utime.sleep_ms(mps)
 
 
-def get_out():
-    return '{"c": %0.2f, "f": %0.2f, "h": %0.1f}' % (temp_c, temp_f, humid)
+def set_mps():
+    global mps
+    mps = int(60000000 / rpm / ppr) - pulse_w
 
 
-led = machine.Pin(25, machine.Pin.OUT)
+pulse_w = 200
+rpm = 5
+fspr = 200              # motor full steps per rev
+ms = 16                 # driver micro steps setting
+ppr = fspr * ms
+mps = 0
 
-# wait for sensor to power up
-sleep_ms(500)
+set_mps()
 
-# I2C address
-address = 0x38
-measure_cmd = [0x30, 0x00]
-
-temp_c = 0.00
-temp_f = 0.00
-humid = 0.0
-
-# Create I2C object
-i2c = machine.I2C(0, scl=machine.Pin(21), sda=machine.Pin(20))
-
-write([0x71])
-state_word = read()
-device_check = read_mem(0x18)
-if state_word == device_check:
-    led_flash(5)
-
-sleep_ms(10)
+usb = USB()
+stdin_thread = start_new_thread(usb.buffer_stdin, ())
 
 while True:
-    measure()
-    print(get_out())
-    led_flash()
-    machine.lightsleep(60000)
+
+    buffCh = usb.get_byte_buffer()  # get a byte if it is available?
+    s = ""
+    while buffCh:
+        s += ''.join([b for b in buffCh])
+        buffCh = usb.get_byte_buffer()  # get a byte if it is available?
+    if len(s) > 0:
+        process_msg(s)
+
+    sleep_ms(50)
