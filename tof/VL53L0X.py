@@ -21,10 +21,11 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+
 from ctypes import CDLL, CFUNCTYPE, POINTER, c_int, c_uint, pointer, c_ubyte, c_uint8, c_uint32
 import sysconfig
 import pkg_resources
-import smbus2 as smbus
+import machine
 import site
 
 
@@ -71,42 +72,32 @@ _I2C_WRITE_FUNC = CFUNCTYPE(c_int, c_ubyte, c_ubyte, POINTER(c_ubyte), c_ubyte)
 suffix = sysconfig.get_config_var('EXT_SUFFIX')
 if suffix is None:
     suffix = ".so"
-_POSSIBLE_LIBRARY_LOCATIONS = ['../bin'] + site.getsitepackages() + [site.getusersitepackages()]
-for lib_location in _POSSIBLE_LIBRARY_LOCATIONS:
-    try:
-        _TOF_LIBRARY = CDLL(lib_location + '/vl53l0x_python' + suffix)
-        break
-    except OSError:
-        pass
-else:
-    raise OSError('Could not find vl53l0x_python' + suffix)
+try:
+    _TOF_LIBRARY = CDLL('vl53l0x_python.cpython-37m-arm-linux-gnueabihf.so')
+except OSError:
+    raise OSError('Could not find vl53l0x_python.so')
 
 
-class VL53L0X:
+class VL53L0X(object):
     """VL53L0X ToF."""
-    def __init__(self, i2c_bus=3, i2c_address=0x29, tca9548a_num=255, tca9548a_addr=0):
+    def __init__(self, i2c_bus=0, i2c_address=0x29, tca9548a_num=255, tca9548a_addr=0):
         """Initialize the VL53L0X ToF Sensor from ST"""
         self._i2c_bus = i2c_bus
         self.i2c_address = i2c_address
         self._tca9548a_num = tca9548a_num
         self._tca9548a_addr = tca9548a_addr
-        self._i2c = smbus.SMBus(i2c_bus)
+        self._i2c = machine.I2C(i2c_bus, scl=machine.Pin(21), sda=machine.Pin(20))
         self._dev = None
         # Resgiter Address
-        self.ADDR_UNIT_ID_HIGH = 0x16 # Serial number high byte
-        self.ADDR_UNIT_ID_LOW = 0x17 # Serial number low byte
-        self.ADDR_I2C_ID_HIGH = 0x18 # Write serial number high byte for I2C address unlock
-        self.ADDR_I2C_ID_LOW = 0x19 # Write serial number low byte for I2C address unlock
-        self.ADDR_I2C_SEC_ADDR = 0x8a # Write new I2C address after unlock
+        self.ADDR_UNIT_ID_HIGH = 0x16   # Serial number high byte
+        self.ADDR_UNIT_ID_LOW = 0x17    # Serial number low byte
+        self.ADDR_I2C_ID_HIGH = 0x18    # Write serial number high byte for I2C address unlock
+        self.ADDR_I2C_ID_LOW = 0x19     # Write serial number low byte for I2C address unlock
+        self.ADDR_I2C_SEC_ADDR = 0x8a   # Write new I2C address after unlock
 
     def open(self):
-        #self._i2c.open(bus=self._i2c_bus)
         self._configure_i2c_library_functions()
         self._dev = _TOF_LIBRARY.initialise(self.i2c_address, self._tca9548a_num, self._tca9548a_addr)
-
-    def close(self):
-        self._i2c.close()
-        self._dev = None
 
     def _configure_i2c_library_functions(self):
         # I2C bus read callback for low level library.
@@ -115,7 +106,8 @@ class VL53L0X:
             result = []
 
             try:
-                result = self._i2c.read_i2c_block_data(address, reg, length)
+                result = self._i2c.readfrom_mem(address, reg, length)
+                # result = self._i2c.read_i2c_block_data(address, reg, length)
             except IOError:
                 ret_val = -1
 
@@ -133,7 +125,11 @@ class VL53L0X:
             for index in range(length):
                 data.append(data_p[index])
             try:
-                self._i2c.write_i2c_block_data(address, reg, data)
+                buf = bytearray()
+                for d in data:
+                    buf.append(d)
+                self._i2c.writeto_mem(address, reg, buf)
+                #self._i2c.write_i2c_block_data(address, reg, data)
             except IOError:
                 ret_val = -1
 
@@ -195,29 +191,3 @@ class VL53L0X:
         status = _TOF_LIBRARY.VL53L0X_ClearInterruptMask(self._dev, mask)
         if status != 0:
             raise Vl53l0xError('Error clearing VL53L0X interrupt')
-
-    def change_address(self, new_address):
-        if self._dev is not None:
-            raise Vl53l0xError('Error changing VL53L0X address')
-
-        self._i2c.open(bus=self._i2c_bus)
-
-        if new_address == None:
-            return
-        elif new_address == self.i2c_address:
-            return
-        else:
-            # read value from 0x16,0x17
-            high = self._i2c.read_byte_data(self.i2c_address, self.ADDR_UNIT_ID_HIGH)
-            low = self._i2c.read_byte_data(self.i2c_address, self.ADDR_UNIT_ID_LOW)
-
-            # write value to 0x18,0x19
-            self._i2c.write_byte_data(self.i2c_address, self.ADDR_I2C_ID_HIGH, high)
-            self._i2c.write_byte_data(self.i2c_address, self.ADDR_I2C_ID_LOW, low)
-
-            # write new_address to 0x1a
-            self._i2c.write_byte_data(self.i2c_address, self.ADDR_I2C_SEC_ADDR, new_address)
-
-            self.i2c_address = new_address
-
-        self._i2c.close()
