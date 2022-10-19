@@ -35,7 +35,7 @@ def measure():
         sleep_ms(50)
     data = read(7)
     temp_raw = ((data[3] & 0x0F) << 16) | (data[4] << 8) | data[5]
-    temp_c = round((temp_raw / 1048575 * 160) - 40, 2)
+    temp_c = round((temp_raw / 1048575 * 200) - 50, 2)
     temp_f = round(temp_c * 1.8 + 32.0, 2)
     humid_raw = ((data[1] << 16) | (data[2] << 8) | data[3]) >> 4
     humid = round(humid_raw / 1048576 * 100, 1)
